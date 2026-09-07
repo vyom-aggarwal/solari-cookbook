@@ -6,3 +6,6 @@ __pycache__/
 .venv/
 venv/
 screenshot.png
+
+# Private working notes — never commit
+private/
