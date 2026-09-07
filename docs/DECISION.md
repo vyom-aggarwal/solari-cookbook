@@ -181,6 +181,30 @@ If the spike says it does not hold, B is dead as specified and we re-pick, most 
 
 ---
 
+## Reopening condition for candidate A — pre-committed
+
+A's architecture was ruled out on one number: concurrent sandboxes at **1 / 2 / 10**, taken from a
+marketing tier table, never observed from our key. That number is the entire basis for "a
+sandbox-per-served-API dies at ten customers", which is what pushed A's serving tier onto browsers
+and cost it points.
+
+Recorded here so it cannot be quietly skipped once `spike-capacity.ts` runs:
+
+> **If the observed concurrent sandbox cap is ≥ 20, candidate A returns to the table and this
+> document is re-scored before any further work.** At ≥ 20, sandbox-per-API is viable for a launch
+> cohort, the "generation and validation only" workaround becomes unnecessary, and A's
+> Solari-nativeness argument gets materially stronger than it reads above.
+>
+> Between **10 and 19**, A is not reopened but the architecture note above is corrected rather than
+> left standing as though it were measured.
+>
+> Below **10**, the original reasoning holds and A stays where it is.
+
+The same applies in reverse to B: if the observed **browser** cap is below 6, B's twelve-tile grid
+cannot exist as designed on this account regardless of what fidelity says.
+
+---
+
 ## The single assumption that kills B if false
 
 > **Twelve concurrent stealth sessions with per-city residential proxies can actually be held at
