@@ -75,11 +75,11 @@ Country-level targets (`de`, `jp`) are scored on ISO country code match only.
 ### Run plan
 
 - **Capacity:** one batch, 12 concurrent stealth sessions, no proxy variation needed.
-- **Fidelity:** 4 US cities × 3 runs = 12 sessions, plus 2 country targets, plus 1 bogus-city
-  control = **15 sessions, run serially** so that a capacity failure cannot be mistaken for a
-  fidelity failure.
-- Estimated cost: ~27 stealth sessions alive ~20 s each, fetching ~2 KB of JSON per session.
-  Under **$0.05** total at any plan rate.
+- **Fidelity:** 4 US cities × 3 runs = 12 sessions, plus **6 country-only US runs (the F6 control
+  arm)**, plus 2 international country targets, plus 1 bogus-city control = **21 sessions, run
+  serially** so that a capacity failure cannot be mistaken for a fidelity failure.
+- Estimated cost: ~33 stealth sessions alive ~20 s each, fetching ~2 KB of JSON per session.
+  Under **$0.08** total at any plan rate.
 
 ---
 
@@ -117,8 +117,9 @@ Let a **NEAR** mean the same quantity is ≤ 250 km.
 | **F1** | Accuracy | HIT rate across the 12 US city runs | **≥ 70%** |
 | **F2** | Stability *(control a)* | Per city, ≥ 2 of 3 runs are HITs | **≥ 3 of the 4 cities** |
 | **F3** | Distinctness *(control b)* | Unique egress IPs; and **no single IP serving two different requested cities** | **≥ 90% unique, and zero cross-city reuse** |
-| **F4** | Residential *(control c)* | `hosting == false` on `ip-api.com` | **≥ 70% of egress IPs** |
+| **F4** | Residential *(control c)* | **ASN organisation name** classified consumer-ISP vs hosting; `hosting` boolean secondary | **≥ 70% classified residential by org** |
 | **F5** | Inertness *(control d)* | `city: "nowhereville", state: "nowhere", country: "us"` | see below |
+| **F6** | **Counterfactual** | City-targeted distance vs **country-only** distance to the same centroid | **≥ 3 of 4 cities at ≤ 0.4×**. **Fatal on its own** |
 
 **F5 in full.** Request a city that does not exist and record which happens:
 
@@ -140,15 +141,75 @@ indistinguishable from twelve VPSes, and removes the only moat the product has. 
 F1 passes, the product is *technically* accurate and *strategically* dead, and the recommendation
 should flip regardless of the other numbers.
 
+**F4 scoring, revised — org name primary, boolean secondary.** `ip-api.com`'s `hosting` flag is
+unreliable in both directions: it misses hosting ranges that resell as "business broadband" and it
+sometimes flags carrier-grade NAT on real consumer ISPs. The fact that actually decides this is the
+**ASN organisation name**. A consumer ISP (Comcast, Verizon, AT&T, Deutsche Telekom, Orange, Jio,
+KDDI…) means residential egress. A hosting org (AWS, Google, Hetzner, OVH, DigitalOcean, M247,
+Leaseweb, Vultr…) means twelve VPSes in a trenchcoat. Scoring:
+
+- **Primary:** classify each egress IP's ASN org against a pre-registered keyword list, below.
+- **Secondary, reported but not scored:** `ip-api.com`'s `hosting` and `mobile` booleans, shown
+  beside the org so any disagreement between the two signals is visible.
+- **Every org string is reported verbatim, per run.** The classifier is a heuristic and its job is
+  to summarise, not to be believed — the raw strings are in the results table so they can be judged
+  directly.
+- If **more than 30% of orgs are unclassified**, F4 is **AMBIGUOUS**, not a pass, and the verbatim
+  strings decide.
+
+Pre-registered keyword lists (substring, case-insensitive):
+
+- **Hosting:** `amazon`, `aws`, `google`, `microsoft`, `azure`, `digitalocean`, `ovh`, `hetzner`,
+  `linode`, `vultr`, `contabo`, `leaseweb`, `m247`, `datacamp`, `choopa`, `scaleway`, `oracle`,
+  `alibaba`, `tencent`, `equinix`, `colo`, `hosting`, `datacenter`, `data center`, `dedicated`,
+  `vps`, `cloud`, `server`
+- **Consumer ISP:** `comcast`, `verizon`, `at&t`, `att `, `spectrum`, `charter`, `cox`,
+  `centurylink`, `frontier`, `t-mobile`, `sprint`, `vodafone`, `telekom`, `orange`, `bt `, `sky `,
+  `virgin`, `telefonica`, `movistar`, `kddi`, `ntt`, `softbank`, `telstra`, `optus`, `rogers`,
+  `bell`, `videotron`, `sfr`, `bouygues`, `free sas`, `jio`, `airtel`, `claro`, `vivo`, `tim `,
+  `telus`, `shaw`, `windstream`, `mediacom`, `cable`, `broadband`, `telecom`, `communications`
+
+---
+
+## F6 — the counterfactual, added before any keyed run
+
+**The gap this closes.** F1 at 70% within 100 km has two possible explanations and the bar as
+originally written could not tell them apart. Either city targeting works, **or** the US
+residential pool happens to be concentrated in exactly the large metros we picked, and we would
+have landed near Los Angeles and Chicago by asking for nothing at all. The second explanation makes
+the parameter decorative and the product a lie, and F1 would still read as a pass.
+
+**The measurement.** Alongside the city-targeted runs, issue **6 matched requests specifying
+`{country: "us"}` only** — no `city`, no `state`. Then, for each of the four target cities, compare:
+
+- `median_city` — median distance from that city's centroid across its 3 city-targeted runs
+- `median_country` — median distance from **that same centroid** across all 6 country-only runs
+
+**Threshold.** For each city, the city-targeted runs must be **at least 2.5× closer**:
+`median_city ≤ 0.4 × median_country`. **F6 passes only if this holds for ≥ 3 of the 4 cities.**
+
+**F6 is fatal on its own.** If it fails, B is dead regardless of F1–F5, and no combination of the
+other numbers rescues it.
+
+**Why 0.4 and not something stricter.** A random US residential IP sits on the order of 1,500–2,000
+km from any given city centroid, so genuine city targeting should produce a 15×–20× improvement,
+not 2.5×. The bar is set well below the expected effect deliberately: it is there to catch
+*decoration*, not to demand perfection from a proxy pool with uneven city inventory.
+
+**Degenerate case, pre-registered so it isn't argued later.** If `median_country` for a city is
+already **< 200 km**, the pool is concentrated there anyway and the ratio test is meaningless for
+that city. Such a city is **excluded from the F6 count and reported as INCONCLUSIVE**. If that
+leaves fewer than 3 scorable cities, **F6 is AMBIGUOUS**, which does not authorise `PLAN.md`.
+
 ---
 
 ## Overall verdict
 
 | Verdict | Condition |
 | --- | --- |
-| **PASS** | CAPACITY is PASS or CONDITIONAL, **and** F1–F4 all pass, **and** F5 is not fatal |
-| **AMBIGUOUS** | Any fidelity metric lands within **10 percentage points below** its threshold |
-| **FAIL** | Anything else |
+| **PASS** | CAPACITY is PASS or CONDITIONAL, **and** F1–F4 all pass, **and** F5 is not fatal, **and F6 passes** |
+| **AMBIGUOUS** | Any fidelity metric lands within **10 percentage points below** its threshold, or F4/F6 return AMBIGUOUS by their own rules |
+| **FAIL** | Anything else, **or F6 fails on its own** |
 
 **`PLAN.md` is written only on PASS.** On AMBIGUOUS or FAIL the numbers come back to the repo owner
 and we re-pick — most likely to candidate C.
